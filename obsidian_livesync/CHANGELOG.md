@@ -1,3 +1,7 @@
+## 3.5.1-2 (2026-04-11)
+- Start CouchDB without depending on a /docker-entrypoint.sh symlink and use numeric UID/GID 5984 for data ownership
+- Write admin and optional secret config explicitly during addon init
+
 ## 3.5.1-1 (2026-04-11)
 - Initial Obsidian LiveSync addon
 - Package CouchDB 3.5.1 with LiveSync-compatible auth and CORS defaults

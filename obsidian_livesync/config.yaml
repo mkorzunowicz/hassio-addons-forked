@@ -32,5 +32,5 @@ slug: obsidian_livesync
 startup: system
 udev: true
 url: https://github.com/mkorzunowicz/hassio-addons/tree/master/obsidian_livesync
-version: 3.5.1-1
+version: 3.5.1-2
 webui: http://[HOST]:[PORT:5984]/_utils/

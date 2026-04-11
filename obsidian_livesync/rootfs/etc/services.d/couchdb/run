@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+declare couchdb_command=""
+
 export COUCHDB_USER="$(bashio::config 'COUCHDB_USER')"
 export COUCHDB_PASSWORD="$(bashio::config 'COUCHDB_PASSWORD')"
 
@@ -9,5 +11,23 @@ if bashio::config.has_value 'COUCHDB_SECRET'; then
     export COUCHDB_SECRET="$(bashio::config 'COUCHDB_SECRET')"
 fi
 
+if [ -x /docker-entrypoint.sh ]; then
+    couchdb_command="/docker-entrypoint.sh /opt/couchdb/bin/couchdb"
+elif [ -x /usr/local/bin/docker-entrypoint.sh ]; then
+    couchdb_command="/usr/local/bin/docker-entrypoint.sh /opt/couchdb/bin/couchdb"
+elif [ -x /opt/couchdb/bin/couchdb ]; then
+    couchdb_command="/opt/couchdb/bin/couchdb"
+else
+    bashio::log.error "CouchDB startup command not found."
+    exit 1
+fi
+
 bashio::log.info "Starting CouchDB for Obsidian LiveSync..."
-exec /docker-entrypoint.sh /opt/couchdb/bin/couchdb
+bashio::log.info "Using CouchDB command: ${couchdb_command}"
+
+if command -v setpriv >/dev/null 2>&1; then
+    export HOME=/opt/couchdb
+    exec setpriv --reuid=5984 --regid=5984 --clear-groups /bin/sh -c "$couchdb_command"
+fi
+
+exec /bin/sh -c "$couchdb_command"
