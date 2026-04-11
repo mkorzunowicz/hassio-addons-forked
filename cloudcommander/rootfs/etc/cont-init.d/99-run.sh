@@ -88,6 +88,8 @@ fi
 bashio::log.info "Starting..."
 
 cd /
+declare CLOUDCMD_LOG_DIR=/var/log/cloudcmd
+declare CLOUDCMD_LOG_FILE=${CLOUDCMD_LOG_DIR}/cloudcmd.log
 declare CLOUDCMD_BIN=""
 declare -a cloudcmd_candidates=(
     /usr/src/app/bin/cloudcmd.mjs
@@ -112,9 +114,34 @@ if [ -z "$CLOUDCMD_BIN" ]; then
     exit 1
 fi
 
+mkdir -p "$CLOUDCMD_LOG_DIR"
+touch "$CLOUDCMD_LOG_FILE"
+
 bashio::log.info "Using Cloud Commander binary: ${CLOUDCMD_BIN}"
+bashio::log.info "Cloud Commander log file: ${CLOUDCMD_LOG_FILE}"
 # shellcheck disable=SC2086
-"$CLOUDCMD_BIN" $DROPBOX_TOKEN $CUSTOMOPTIONS &
-bashio::net.wait_for 8000 localhost 900 || true
+"$CLOUDCMD_BIN" $DROPBOX_TOKEN $CUSTOMOPTIONS >>"$CLOUDCMD_LOG_FILE" 2>&1 &
+declare CLOUDCMD_PID=$!
+
+bashio::log.info "Cloud Commander started with PID ${CLOUDCMD_PID}"
+
+if ! bashio::net.wait_for 8000 localhost 900; then
+    bashio::log.error "Cloud Commander did not open port 8000 within the startup timeout."
+    if kill -0 "$CLOUDCMD_PID" >/dev/null 2>&1; then
+        bashio::log.error "Cloud Commander process ${CLOUDCMD_PID} is still running."
+    else
+        bashio::log.error "Cloud Commander process ${CLOUDCMD_PID} exited before startup completed."
+    fi
+
+    if [ -s "$CLOUDCMD_LOG_FILE" ]; then
+        bashio::log.error "Last 50 lines of Cloud Commander log:"
+        while IFS= read -r line; do
+            bashio::log.error "$line"
+        done < <(tail -n 50 "$CLOUDCMD_LOG_FILE")
+    else
+        bashio::log.error "Cloud Commander log file is empty."
+    fi
+fi
+
 bashio::log.info "Started !"
 exec nginx
