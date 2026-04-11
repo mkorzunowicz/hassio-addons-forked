@@ -15,7 +15,7 @@
 #################
 
 ARG BUILD_VERSION
-ARG BUILD_FROM
+ARG BUILD_FROM=coderaiser/cloudcmd:latest
 FROM ${BUILD_FROM}
 
 ##################

@@ -1,4 +1,8 @@
 
+## 19.12.1-2 (2026-04-11)
+- Switch Cloud Commander addon to source-built mode by removing the registry image override
+- Set the Dockerfile default base image to coderaiser/cloudcmd:latest for Supervisor builds
+
 ## 19.12.1-1 (2026-04-11)
 - Update to latest version from coderaiser/cloudcmd (changelog : https://github.com/coderaiser/cloudcmd/releases)
 - Add startup diagnostics for Cloud Commander process output and timeout failures
