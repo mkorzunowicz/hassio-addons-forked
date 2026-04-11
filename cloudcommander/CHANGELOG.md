@@ -1,4 +1,7 @@
 
+## 19.12.1-3 (2026-04-11)
+- Vendor build helper scripts into the addon folder so Supervisor source builds include them
+
 ## 19.12.1-2 (2026-04-11)
 - Switch Cloud Commander addon to source-built mode by removing the registry image override
 - Set the Dockerfile default base image to coderaiser/cloudcmd:latest for Supervisor builds
