@@ -1,0 +1,36 @@
+arch:
+  - aarch64
+  - amd64
+apparmor: false
+backup: cold
+description: CouchDB server preconfigured for Obsidian LiveSync
+environment:
+  CONFIG_LOCATION: /opt/couchdb/etc/local.d/obsidian-livesync.ini
+init: false
+map:
+  - addon_config:rw
+name: Obsidian LiveSync
+options:
+  env_vars: []
+  COUCHDB_USER: obsidian
+  COUCHDB_PASSWORD: change_me
+  DEFAULT_DATABASE: obsidian-livesync
+ports:
+  5984/tcp: 5984
+ports_description:
+  5984/tcp: CouchDB API and Fauxton UI
+schema:
+  env_vars:
+    - name: match(^[A-Za-z0-9_]+$)
+      value: str?
+  COUCHDB_USER: str
+  COUCHDB_PASSWORD: password
+  COUCHDB_SECRET: password?
+  DEFAULT_DATABASE: str?
+  PUBLIC_URL: url?
+slug: obsidian_livesync
+startup: system
+udev: true
+url: https://github.com/mkorzunowicz/hassio-addons/tree/master/obsidian_livesync
+version: 3.5.1-1
+webui: http://[HOST]:[PORT:5984]/_utils/

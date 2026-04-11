@@ -1,0 +1,64 @@
+#!/usr/bin/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+
+COUCHDB_URL="http://127.0.0.1:5984"
+COUCHDB_USER="$(bashio::config 'COUCHDB_USER')"
+COUCHDB_PASSWORD="$(bashio::config 'COUCHDB_PASSWORD')"
+DEFAULT_DATABASE="$(bashio::config 'DEFAULT_DATABASE')"
+PUBLIC_URL="$(bashio::config 'PUBLIC_URL')"
+
+wait_for_couchdb() {
+    bashio::net.wait_for 5984 127.0.0.1 300 >/dev/null 2>&1 || true
+
+    local attempt
+    for attempt in $(seq 1 90); do
+        if curl -fsS -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "$COUCHDB_URL/_up" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    bashio::log.error "CouchDB did not become ready in time for LiveSync bootstrap."
+    return 1
+}
+
+create_database() {
+    local database_name="$1"
+    local status
+
+    status=$(curl -sS -o /dev/null -w "%{http_code}" -u "$COUCHDB_USER:$COUCHDB_PASSWORD" -X PUT "$COUCHDB_URL/$database_name")
+    case "$status" in
+        200|201|202)
+            bashio::log.info "Created database: $database_name"
+            ;;
+        412)
+            bashio::log.info "Database already exists: $database_name"
+            ;;
+        *)
+            bashio::log.warning "Unexpected response while creating database $database_name: HTTP $status"
+            ;;
+    esac
+}
+
+wait_for_couchdb
+
+create_database _users
+create_database _replicator
+create_database _global_changes
+
+if [ -n "$DEFAULT_DATABASE" ]; then
+    create_database "$DEFAULT_DATABASE"
+fi
+
+bashio::log.info "Obsidian LiveSync backend is ready."
+if [ -n "$PUBLIC_URL" ]; then
+    bashio::log.info "Public CouchDB URL: $PUBLIC_URL"
+    bashio::log.info "Fauxton UI: $PUBLIC_URL/_utils/"
+else
+    bashio::log.info "CouchDB is reachable on the addon port 5984."
+fi
+bashio::log.info "LiveSync username: $COUCHDB_USER"
+if [ -n "$DEFAULT_DATABASE" ]; then
+    bashio::log.info "Suggested database name: $DEFAULT_DATABASE"
+fi
