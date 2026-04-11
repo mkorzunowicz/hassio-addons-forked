@@ -15,8 +15,7 @@
 #################
 
 ARG BUILD_VERSION
-ARG BUILD_FROM=couchdb:3.5.1
-FROM $BUILD_FROM
+FROM couchdb:3.5.1
 
 ##################
 # 2 Modify Image #

@@ -1,3 +1,6 @@
+## 3.5.1-3 (2026-04-11)
+- Pin the Docker base image directly to CouchDB 3.5.1 so Supervisor source builds do not replace it with the Home Assistant base image
+
 ## 3.5.1-2 (2026-04-11)
 - Start CouchDB without depending on a /docker-entrypoint.sh symlink and use numeric UID/GID 5984 for data ownership
 - Write admin and optional secret config explicitly during addon init
