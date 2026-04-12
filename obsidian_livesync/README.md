@@ -66,11 +66,43 @@ A dedicated subdomain is the simplest setup, for example `https://notes-db.examp
 
 If you publish CouchDB through a path-based reverse proxy instead of a subdomain, make sure the proxy rewrites requests correctly and preserves authorization headers. The upstream LiveSync docs recommend avoiding root-path mounting tricks when possible.
 
+### Example: Home Assistant nginx addon
+
+If you use the common Home Assistant nginx addon, add a server block under `/share/nginx_proxy/`, for example `/share/nginx_proxy/obsidian-livesync.conf`:
+
+```nginx
+server {
+	listen 443 ssl;
+	server_name notes-db.example.duckdns.org;
+
+	ssl_certificate /ssl/fullchain.pem;
+	ssl_certificate_key /ssl/privkey.pem;
+
+	location / {
+		proxy_pass http://homeassistant.local.hass.io:5984;
+		proxy_redirect off;
+		proxy_buffering off;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+}
+```
+
+Notes about this configuration:
+
+- Put the file in `/share/nginx_proxy/` and reload or restart the nginx addon.
+- Use your real public hostname in `server_name`.
+- The `proxy_redirect off` and `proxy_buffering off` settings match upstream CouchDB reverse-proxy guidance more closely.
+- Do not add separate CORS handling in nginx unless you have a specific reason. CouchDB already handles the CORS headers required by LiveSync.
+- If `homeassistant.local.hass.io` does not resolve in your nginx addon, replace it with the reachable Home Assistant host or addon network address in your environment.
+
 ## Obsidian LiveSync settings
 
 After the addon starts, configure the plugin with:
 
-- URI: your public CouchDB URL, for example `https://notes-db.example.com`
+- URI: your public CouchDB URL, for example `https://notes-db.example.duckdns.org`
 - Username: the private vault username from `VAULT_USERS`, or `COUCHDB_USER` in single-user mode
 - Password: the matching password for that vault user, or `COUCHDB_PASSWORD` in single-user mode
 - Database name: the vault database assigned to that user, or `DEFAULT_DATABASE` in single-user mode
