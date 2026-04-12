@@ -1,3 +1,11 @@
+## 3.5.1-5 (2026-04-12)
+- Stop overwriting existing private vault user passwords from `VAULT_USERS` on restart so users can rotate their own CouchDB password later
+
+## 3.5.1-4 (2026-04-12)
+- Add `VAULT_USERS` support to provision multiple private LiveSync vault users in one addon instance
+- Apply per-database CouchDB security policies so separate users can keep separate private vaults
+- Warn on startup when the default admin password is still in use
+
 ## 3.5.1-3 (2026-04-11)
 - Pin the Docker base image directly to CouchDB 3.5.1 so Supervisor source builds do not replace it with the Home Assistant base image
 

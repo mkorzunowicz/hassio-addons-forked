@@ -6,6 +6,7 @@ COUCHDB_URL="http://127.0.0.1:5984"
 COUCHDB_USER="$(bashio::config 'COUCHDB_USER')"
 COUCHDB_PASSWORD="$(bashio::config 'COUCHDB_PASSWORD')"
 DEFAULT_DATABASE="$(bashio::config 'DEFAULT_DATABASE')"
+VAULT_USERS_JSON="$(bashio::config 'VAULT_USERS')"
 PUBLIC_URL="$(bashio::config 'PUBLIC_URL')"
 
 wait_for_couchdb() {
@@ -41,13 +42,104 @@ create_database() {
     esac
 }
 
+ensure_user() {
+    local username="$1"
+    local password="$2"
+    local existing_doc payload status
+
+    existing_doc=$(curl -fsS \
+        -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \
+        "$COUCHDB_URL/_users/org.couchdb.user:$username" 2>/dev/null || true)
+
+    if [ -n "$existing_doc" ]; then
+        bashio::log.info "CouchDB user already exists, keeping existing password: $username"
+        return 0
+    fi
+
+    payload=$(jq -nc \
+        --arg username "$username" \
+        --arg password "$password" \
+        '{name:$username, password:$password, roles:[], type:"user"}')
+
+    status=$(curl -sS -o /dev/null -w "%{http_code}" \
+        -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \
+        -H "Content-Type: application/json" \
+        -X PUT "$COUCHDB_URL/_users/org.couchdb.user:$username" \
+        -d "$payload")
+
+    case "$status" in
+        200|201|202)
+            bashio::log.info "Provisioned CouchDB user: $username"
+            ;;
+        *)
+            bashio::log.warning "Unexpected response while provisioning user $username: HTTP $status"
+            ;;
+    esac
+}
+
+set_database_security() {
+    local database_name="$1"
+    local members_json="$2"
+    local payload status
+
+    payload=$(jq -nc \
+        --argjson members "$members_json" \
+        '{admins:{names:[],roles:[]},members:{names:$members,roles:[]}}')
+
+    status=$(curl -sS -o /dev/null -w "%{http_code}" \
+        -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \
+        -H "Content-Type: application/json" \
+        -X PUT "$COUCHDB_URL/$database_name/_security" \
+        -d "$payload")
+
+    case "$status" in
+        200|201|202)
+            bashio::log.info "Applied security policy to database: $database_name"
+            ;;
+        *)
+            bashio::log.warning "Unexpected response while securing database $database_name: HTTP $status"
+            ;;
+    esac
+}
+
+configure_vault_users() {
+    local compact_json="$1"
+    local entry username password database members_json
+
+    if ! printf '%s' "$compact_json" | jq -e '
+        type == "array" and
+        all(.[]; type == "object" and (.username | type == "string" and length > 0) and (.password | type == "string" and length > 0) and (.database | type == "string" and length > 0))
+    ' >/dev/null; then
+        bashio::log.error "VAULT_USERS must be a JSON array of objects with username, password, and database fields."
+        return 1
+    fi
+
+    while IFS= read -r entry; do
+        username=$(printf '%s' "$entry" | jq -r '.username')
+        password=$(printf '%s' "$entry" | jq -r '.password')
+        ensure_user "$username" "$password"
+    done < <(printf '%s' "$compact_json" | jq -c '.[]')
+
+    while IFS= read -r database; do
+        create_database "$database"
+        members_json=$(printf '%s' "$compact_json" | jq -c --arg database "$database" '[.[] | select(.database == $database) | .username] | unique')
+        set_database_security "$database" "$members_json"
+    done < <(printf '%s' "$compact_json" | jq -r '.[].database' | sort -u)
+}
+
 wait_for_couchdb
+
+if [ "$COUCHDB_PASSWORD" = "change_me" ]; then
+    bashio::log.warning "COUCHDB_PASSWORD is still set to the default value. Change it before exposing this addon."
+fi
 
 create_database _users
 create_database _replicator
 create_database _global_changes
 
-if [ -n "$DEFAULT_DATABASE" ]; then
+if [ -n "$VAULT_USERS_JSON" ]; then
+    configure_vault_users "$VAULT_USERS_JSON"
+elif [ -n "$DEFAULT_DATABASE" ]; then
     create_database "$DEFAULT_DATABASE"
 fi
 
@@ -58,7 +150,10 @@ if [ -n "$PUBLIC_URL" ]; then
 else
     bashio::log.info "CouchDB is reachable on the addon port 5984."
 fi
-bashio::log.info "LiveSync username: $COUCHDB_USER"
-if [ -n "$DEFAULT_DATABASE" ]; then
+bashio::log.info "CouchDB admin username: $COUCHDB_USER"
+if [ -n "$DEFAULT_DATABASE" ] && [ -z "$VAULT_USERS_JSON" ]; then
     bashio::log.info "Suggested database name: $DEFAULT_DATABASE"
+fi
+if [ -n "$VAULT_USERS_JSON" ]; then
+    bashio::log.info "Configured private vault users from VAULT_USERS."
 fi
