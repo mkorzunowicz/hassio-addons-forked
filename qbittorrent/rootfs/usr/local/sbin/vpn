@@ -149,6 +149,64 @@ _resolve_hostname() {
     echo "${ips[@]}"
 }
 
+_vpn_probe_public_ip() {
+    local interface="$1"
+    local resp
+    local url
+    local urls=(
+        "https://icanhazip.com"
+        "https://ifconfig.me/ip"
+        "https://api64.ipify.org"
+        "https://checkip.amazonaws.com"
+    )
+
+    for url in "${urls[@]}"; do
+        resp="$(curl -fsS --max-time 8 --interface "${interface}" "${url}" 2>/dev/null || true)"
+        resp="${resp//[[:space:]]/}"
+        if [[ "${resp}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "${resp}" =~ ^[0-9a-fA-F:]+$ ]]; then
+            printf '%s\n' "${resp}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+_qbt_apply_vpn_bind() {
+    local qbt_config_file="/config/qBittorrent/qBittorrent.conf"
+    local interface="$1"
+    local bind_address=""
+
+    if ! bashio::fs.file_exists "${qbt_config_file}"; then
+        bashio::log.warning "qBittorrent config file not found while applying VPN bind settings."
+        return 0
+    fi
+
+    bind_address="$(ip -o -4 addr show dev "${interface}" scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1 | head -n1)"
+    if [[ -z "${bind_address}" ]]; then
+        bind_address="$(ip -o -6 addr show dev "${interface}" scope global 2>/dev/null | awk '{print $4}' | cut -d'/' -f1 | head -n1)"
+    fi
+
+    sed -i '/^Connection\\Interface=/d' "${qbt_config_file}"
+    sed -i '/^Connection\\InterfaceName=/d' "${qbt_config_file}"
+    sed -i '/^Connection\\InterfaceAddress=/d' "${qbt_config_file}"
+    sed -i '/^Session\\Interface=/d' "${qbt_config_file}"
+    sed -i '/^Session\\InterfaceName=/d' "${qbt_config_file}"
+    sed -i '/^Session\\InterfaceAddress=/d' "${qbt_config_file}"
+    sed -i "/\\[Preferences\\]/a \\Connection\\\\Interface=${interface}" "${qbt_config_file}"
+    sed -i "/\\[Preferences\\]/a \\Connection\\\\InterfaceName=${interface}" "${qbt_config_file}"
+    sed -i "/\\[BitTorrent\\]/a \\Session\\\\Interface=${interface}" "${qbt_config_file}"
+    sed -i "/\\[BitTorrent\\]/a \\Session\\\\InterfaceName=${interface}" "${qbt_config_file}"
+
+    if [[ -n "${bind_address}" ]]; then
+        sed -i "/\\[Preferences\\]/a \\Connection\\\\InterfaceAddress=${bind_address}" "${qbt_config_file}"
+        sed -i "/\\[BitTorrent\\]/a \\Session\\\\InterfaceAddress=${bind_address}" "${qbt_config_file}"
+        bashio::log.info "Applied qBittorrent VPN bind target: interface ${interface}, address ${bind_address}."
+    else
+        bashio::log.warning "No global IP address found on ${interface}; qBittorrent will be bound by interface only."
+    fi
+}
+
 _routing_add() {
     bashio::log.info "Adding routing rules for VPN interface ${config["Interface"]}..."
 
@@ -355,6 +413,16 @@ _wireguard_up() {
     _resolvconf "update" || return 1
     # Wait for handshake to be established before returning success
     _wireguard_check 10 || return 1
+
+    _qbt_apply_vpn_bind "${config["Interface"]}"
+
+    local probed_ip=""
+    probed_ip="$(_vpn_probe_public_ip "${config["Interface"]}" || true)"
+    if [[ -n "${probed_ip}" ]]; then
+        bashio::log.info "WireGuard tunneled public IP probe via ${config["Interface"]}: ${probed_ip}"
+    else
+        bashio::log.warning "WireGuard tunneled public IP probe via ${config["Interface"]} failed."
+    fi
 }
 
 _wireguard_down() {
@@ -544,6 +612,16 @@ _openpvn_postup() {
     fi
     # Update resolv.conf with VPN DNS servers
     _resolvconf "update" || return 1
+
+    _qbt_apply_vpn_bind "${config["Interface"]}"
+
+    local probed_ip=""
+    probed_ip="$(_vpn_probe_public_ip "${config["Interface"]}" || true)"
+    if [[ -n "${probed_ip}" ]]; then
+        bashio::log.info "OpenVPN tunneled public IP probe via ${config["Interface"]}: ${probed_ip}"
+    else
+        bashio::log.warning "OpenVPN tunneled public IP probe via ${config["Interface"]} failed."
+    fi
 }
 
 _openpvn_postdown() {
