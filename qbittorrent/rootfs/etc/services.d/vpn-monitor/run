@@ -7,6 +7,9 @@ export PATH="/usr/local/sbin:/usr/local/bin:${PATH}"
 REAL_IP_FILE="/currentip"
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-300}"
 VPN_INFO_URL="${VPN_INFO_URL:-https://ipinfo.io}"
+QBT_WEBUI_PORT="${WEBUI_PORT:-8080}"
+QBT_WEBUI_SCHEME="http"
+QBT_WEBUI_BASE="http://127.0.0.1:${QBT_WEBUI_PORT}"
 
 # -------------------------------
 # Helpers
@@ -43,6 +46,83 @@ _fetch_public_ip() {
     done
 
     return 1
+}
+
+_qbt_api_login() {
+    local username password sid
+
+    username="$(bashio::config 'Username' 2>/dev/null || true)"
+    username="${username:-admin}"
+    password="homeassistant"
+
+    sid="$(curl -fsS -i --max-time 10 \
+        --header "Referer: ${QBT_WEBUI_BASE}" \
+        --data "username=${username}" \
+        --data-urlencode "password=${password}" \
+        "${QBT_WEBUI_BASE}/api/v2/auth/login" 2>/dev/null \
+        | grep -oP '(?<=Set-Cookie: )SID=[^;]+' \
+        | head -n1 || true)"
+
+    if [[ -n "${sid}" ]]; then
+        printf '%s\n' "${sid}"
+        return 0
+    fi
+
+    return 1
+}
+
+_qbt_wait_ready() {
+    local attempt
+
+    for attempt in {1..20}; do
+        if curl -fsS --max-time 3 "${QBT_WEBUI_BASE}/api/v2/app/version" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    return 1
+}
+
+_qbt_log_runtime_state() {
+    local sid preferences sync_data current_network_interface current_interface_name current_interface_address
+    local listen_port connection_status last_external_address_v4 last_external_address_v6
+
+    if ! _qbt_wait_ready; then
+        bashio::log.warning "qBittorrent Web API not reachable on ${QBT_WEBUI_BASE}; skipping runtime diagnostics."
+        return 0
+    fi
+
+    sid="$(_qbt_api_login || true)"
+    if [[ -z "${sid}" ]]; then
+        bashio::log.warning "Failed to authenticate to qBittorrent Web API; skipping runtime diagnostics."
+        return 0
+    fi
+
+    preferences="$(curl -fsS --max-time 10 \
+        --header "Referer: ${QBT_WEBUI_BASE}" \
+        --cookie "${sid}" \
+        "${QBT_WEBUI_BASE}/api/v2/app/preferences" 2>/dev/null || true)"
+    sync_data="$(curl -fsS --max-time 10 \
+        --header "Referer: ${QBT_WEBUI_BASE}" \
+        --cookie "${sid}" \
+        "${QBT_WEBUI_BASE}/api/v2/sync/maindata?rid=0" 2>/dev/null || true)"
+
+    if [[ -z "${preferences}" ]] || [[ -z "${sync_data}" ]]; then
+        bashio::log.warning "Failed to query qBittorrent runtime API endpoints; skipping diagnostics."
+        return 0
+    fi
+
+    current_network_interface="$(printf '%s' "${preferences}" | grep -oP '(?<="current_network_interface":")[^"]*' | head -n1 || true)"
+    current_interface_name="$(printf '%s' "${preferences}" | grep -oP '(?<="current_interface_name":")[^"]*' | head -n1 || true)"
+    current_interface_address="$(printf '%s' "${preferences}" | grep -oP '(?<="current_interface_address":")[^"]*' | head -n1 || true)"
+    listen_port="$(printf '%s' "${preferences}" | grep -oP '(?<="listen_port":)\d+' | head -n1 || true)"
+    connection_status="$(printf '%s' "${sync_data}" | grep -oP '(?<="connection_status":")[^"]*' | head -n1 || true)"
+    last_external_address_v4="$(printf '%s' "${sync_data}" | grep -oP '(?<="last_external_address_v4":")[^"]*' | head -n1 || true)"
+    last_external_address_v6="$(printf '%s' "${sync_data}" | grep -oP '(?<="last_external_address_v6":")[^"]*' | head -n1 || true)"
+
+    bashio::log.info "qBittorrent runtime diagnostics: interface=${current_network_interface:-<empty>}, interface_name=${current_interface_name:-<empty>}, interface_address=${current_interface_address:-<empty>}, listen_port=${listen_port:-<empty>}, connection_status=${connection_status:-<empty>}"
+    bashio::log.info "qBittorrent external IP diagnostics: v4=${last_external_address_v4:-<empty>}, v6=${last_external_address_v6:-<empty>}"
 }
 
 read_real_ip() {
@@ -166,6 +246,8 @@ else
 fi
 
 bashio::log.info "VPN detected; enabling IP leak protection and periodic monitoring."
+
+_qbt_log_runtime_state
 
 if ! VPN_INFO_OUT="$(wait_for_vpn_ip)"; then
     bashio::log.error "Unable to obtain a VPN external IP different from real IP. Stopping add-on."
