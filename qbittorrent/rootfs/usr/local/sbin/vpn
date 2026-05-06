@@ -522,9 +522,7 @@ _openvpn_up() {
         --up ${config["PostUpScript"]} \
         --down ${config["PostDownScript"]} \
         --up-delay  \
-        --up-restart \
-        --route-nopull \
-        --route-noexec" || return 1
+        --up-restart" || return 1
 
     # Wait for the VPN interface to come up
     _openvpn_check 30 || return 1
