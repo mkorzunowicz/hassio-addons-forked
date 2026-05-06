@@ -8,8 +8,8 @@ REAL_IP_FILE="/currentip"
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-300}"
 VPN_INFO_URL="${VPN_INFO_URL:-https://ipinfo.io}"
 QBT_WEBUI_PORT="${WEBUI_PORT:-8080}"
-QBT_WEBUI_SCHEME="http"
 QBT_WEBUI_BASE="http://127.0.0.1:${QBT_WEBUI_PORT}"
+QBT_CONFIG_FILE="/config/qBittorrent/qBittorrent.conf"
 
 # -------------------------------
 # Helpers
@@ -71,11 +71,52 @@ _qbt_api_login() {
     return 1
 }
 
-_qbt_wait_ready() {
-    local attempt
+_qbt_api_get() {
+    local endpoint sid response
 
-    for attempt in {1..20}; do
-        if curl -fsS --max-time 3 "${QBT_WEBUI_BASE}/api/v2/app/version" >/dev/null 2>&1; then
+    endpoint="$1"
+    sid="${2:-}"
+
+    if [[ -n "${sid}" ]]; then
+        response="$(curl -fsS --max-time 10 \
+            --header "Referer: ${QBT_WEBUI_BASE}" \
+            --cookie "${sid}" \
+            "${QBT_WEBUI_BASE}${endpoint}" 2>/dev/null || true)"
+        if [[ -n "${response}" ]]; then
+            printf '%s' "${response}"
+            return 0
+        fi
+    fi
+
+    response="$(curl -fsS --max-time 10 \
+        --header "Referer: ${QBT_WEBUI_BASE}" \
+        "${QBT_WEBUI_BASE}${endpoint}" 2>/dev/null || true)"
+    if [[ -n "${response}" ]]; then
+        printf '%s' "${response}"
+        return 0
+    fi
+
+    return 1
+}
+
+_qbt_config_get() {
+    local key
+
+    key="$1"
+    [[ -f "${QBT_CONFIG_FILE}" ]] || return 1
+
+    grep -m1 -F "${key}=" "${QBT_CONFIG_FILE}" 2>/dev/null | cut -d= -f2- || true
+}
+
+_qbt_wait_ready() {
+    local attempt sid
+
+    for attempt in {1..30}; do
+        sid="$(_qbt_api_login || true)"
+        if _qbt_api_get "/api/v2/app/preferences" "${sid}" >/dev/null 2>&1; then
+            return 0
+        fi
+        if _qbt_api_get "/api/v2/sync/maindata?rid=0" "${sid}" >/dev/null 2>&1; then
             return 0
         fi
         sleep 2
@@ -87,29 +128,29 @@ _qbt_wait_ready() {
 _qbt_log_runtime_state() {
     local sid preferences sync_data current_network_interface current_interface_name current_interface_address
     local listen_port connection_status last_external_address_v4 last_external_address_v6
+    local configured_interface configured_interface_name configured_interface_address configured_listen_port
 
     if ! _qbt_wait_ready; then
-        bashio::log.warning "qBittorrent Web API not reachable on ${QBT_WEBUI_BASE}; skipping runtime diagnostics."
+        bashio::log.warning "qBittorrent runtime API endpoints not reachable on ${QBT_WEBUI_BASE}; skipping runtime diagnostics."
         return 0
     fi
+
+    configured_interface="$(_qbt_config_get 'Connection\\Interface')"
+    configured_interface_name="$(_qbt_config_get 'Connection\\InterfaceName')"
+    configured_interface_address="$(_qbt_config_get 'Connection\\InterfaceAddress')"
+    configured_listen_port="$(_qbt_config_get 'Connection\\PortRangeMin')"
 
     sid="$(_qbt_api_login || true)"
     if [[ -z "${sid}" ]]; then
-        bashio::log.warning "Failed to authenticate to qBittorrent Web API; skipping runtime diagnostics."
-        return 0
+        bashio::log.info "Default qBittorrent Web API credentials rejected; trying localhost API access without authentication."
     fi
 
-    preferences="$(curl -fsS --max-time 10 \
-        --header "Referer: ${QBT_WEBUI_BASE}" \
-        --cookie "${sid}" \
-        "${QBT_WEBUI_BASE}/api/v2/app/preferences" 2>/dev/null || true)"
-    sync_data="$(curl -fsS --max-time 10 \
-        --header "Referer: ${QBT_WEBUI_BASE}" \
-        --cookie "${sid}" \
-        "${QBT_WEBUI_BASE}/api/v2/sync/maindata?rid=0" 2>/dev/null || true)"
+    preferences="$(_qbt_api_get '/api/v2/app/preferences' "${sid}" || true)"
+    sync_data="$(_qbt_api_get '/api/v2/sync/maindata?rid=0' "${sid}" || true)"
 
     if [[ -z "${preferences}" ]] || [[ -z "${sync_data}" ]]; then
-        bashio::log.warning "Failed to query qBittorrent runtime API endpoints; skipping diagnostics."
+        bashio::log.warning "Failed to query qBittorrent runtime API endpoints even after localhost fallback."
+        bashio::log.info "qBittorrent configured bind settings: interface=${configured_interface:-<empty>}, interface_name=${configured_interface_name:-<empty>}, interface_address=${configured_interface_address:-<empty>}, configured_port=${configured_listen_port:-<empty>}"
         return 0
     fi
 
@@ -121,6 +162,7 @@ _qbt_log_runtime_state() {
     last_external_address_v4="$(printf '%s' "${sync_data}" | grep -oP '(?<="last_external_address_v4":")[^"]*' | head -n1 || true)"
     last_external_address_v6="$(printf '%s' "${sync_data}" | grep -oP '(?<="last_external_address_v6":")[^"]*' | head -n1 || true)"
 
+    bashio::log.info "qBittorrent configured bind settings: interface=${configured_interface:-<empty>}, interface_name=${configured_interface_name:-<empty>}, interface_address=${configured_interface_address:-<empty>}, configured_port=${configured_listen_port:-<empty>}"
     bashio::log.info "qBittorrent runtime diagnostics: interface=${current_network_interface:-<empty>}, interface_name=${current_interface_name:-<empty>}, interface_address=${current_interface_address:-<empty>}, listen_port=${listen_port:-<empty>}, connection_status=${connection_status:-<empty>}"
     bashio::log.info "qBittorrent external IP diagnostics: v4=${last_external_address_v4:-<empty>}, v6=${last_external_address_v6:-<empty>}"
 }
