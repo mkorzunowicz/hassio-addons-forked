@@ -90,9 +90,14 @@ echo "${interface_name}" > "${WIREGUARD_STATE_DIR}/interface"
 bashio::log.info "Using interface binding in the qBittorrent app"
 
 if bashio::fs.file_exists "${QBT_CONFIG_FILE}"; then
-    sed -i '/Interface/d' "${QBT_CONFIG_FILE}"
-    sed -i "/\\[Preferences\\]/ i\\Connection\\\\Interface=${interface_name}" "${QBT_CONFIG_FILE}"
-    sed -i "/\\[Preferences\\]/ i\\Connection\\\\InterfaceName=${interface_name}" "${QBT_CONFIG_FILE}"
+    sed -i '/^Connection\\Interface=/d' "${QBT_CONFIG_FILE}"
+    sed -i '/^Connection\\InterfaceName=/d' "${QBT_CONFIG_FILE}"
+    sed -i '/^Connection\\InterfaceAddress=/d' "${QBT_CONFIG_FILE}"
+    sed -i '/^Session\\Interface=/d' "${QBT_CONFIG_FILE}"
+    sed -i '/^Session\\InterfaceName=/d' "${QBT_CONFIG_FILE}"
+    sed -i '/^Session\\InterfaceAddress=/d' "${QBT_CONFIG_FILE}"
+    sed -i "/\\[Preferences\\]/a \\Connection\\\\Interface=${interface_name}" "${QBT_CONFIG_FILE}"
+    sed -i "/\\[Preferences\\]/a \\Connection\\\\InterfaceName=${interface_name}" "${QBT_CONFIG_FILE}"
     sed -i "/\\[BitTorrent\\]/a \\Session\\\\Interface=${interface_name}" "${QBT_CONFIG_FILE}"
     sed -i "/\\[BitTorrent\\]/a \\Session\\\\InterfaceName=${interface_name}" "${QBT_CONFIG_FILE}"
 else
